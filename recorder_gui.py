@@ -26,10 +26,15 @@ except Exception:
 from audio_engine import AudioEngine
 import transcriber
 
+try:
+    from version import BUILD_VERSION
+except Exception:
+    BUILD_VERSION = "2026/10/19-09:10"
+
 class TeamsRecorderApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Teams 會議雙向錄音 ＆ AI 語音轉文字 (揚聲器+麥克風混音 / 時間軸+人物識別)")
+        self.root.title(f"Teams 會議雙向錄音 ＆ AI 語音轉文字 [v{BUILD_VERSION}] (揚聲器+麥克風混音 / 時間軸+人物識別)")
         # 橫向電腦寬螢幕預設尺寸
         self.root.geometry("1280x780")
         self.root.minsize(1120, 680)
@@ -79,7 +84,7 @@ class TeamsRecorderApp:
         top_bar = tk.Frame(self.root, bg="#24292f", height=42, padx=16)
         top_bar.pack(fill="x")
 
-        top_title = tk.Label(top_bar, text="🎙️ Teams 會議雙向錄音 ＆ AI 語音轉文字", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#24292f")
+        top_title = tk.Label(top_bar, text=f"🎙️ Teams 會議雙向錄音 ＆ AI 語音轉文字 (v{BUILD_VERSION})", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#24292f")
         top_title.pack(side="left", pady=8)
 
         top_sub = tk.Label(top_bar, text="喇叭/麥克風雙軌混音  •  Gemini 3.8 Flash AI 時間軸＋角色識別  •  自動分存摘要與逐字稿", font=("Segoe UI", 9), fg="#8b949e", bg="#24292f")
