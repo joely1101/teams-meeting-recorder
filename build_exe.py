@@ -52,7 +52,16 @@ def build():
     if os.path.exists(www_meeting_dir):
         www_exe = os.path.join(www_meeting_dir, "Teams會議錄音與轉文字.exe")
         shutil.copy2(dist_exe, www_exe)
-        print(f"      已同步部署至 Web 伺服器下載目錄: {www_exe}")
+        print(f"      已同步部署至 Windows Web 下載目錄: {www_exe}")
+
+    wsl_meeting_dir = r"\\wsl.localhost\Ubuntu\home\joel\www\meeting"
+    if os.path.exists(wsl_meeting_dir):
+        wsl_exe = os.path.join(wsl_meeting_dir, "Teams會議錄音與轉文字.exe")
+        try:
+            shutil.copy2(dist_exe, wsl_exe)
+            print(f"      已同步部署至 WSL ~/www Web 下載目錄: {wsl_exe}")
+        except Exception as e:
+            print(f"      部署至 WSL 失敗: {e}")
 
     print(f"==================================================")
     print(f"[OK] Build completed! Title version: [v{build_time}]")
