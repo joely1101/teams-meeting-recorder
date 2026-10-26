@@ -62,14 +62,16 @@ jobs:
           $tag = "${{ steps.get_tag.outputs.TAG_NAME }}"
           New-Item -ItemType Directory -Path "release_pkg" -Force
 
-          $exePath = "dist/Teams會議錄音與轉文字.exe"
-          if (-not (Test-Path $exePath)) {
-              Write-Error "Executable not found at $exePath"
+          $srcExe = "dist/Teams會議錄音與轉文字.exe"
+          if (-not (Test-Path $srcExe)) {
+              Write-Error "Executable not found at $srcExe"
               exit 1
           }
 
-          # 複製檔案至釋出包目錄
-          Copy-Item -Path $exePath -Destination "release_pkg/Teams會議錄音與轉文字.exe"
+          # 提供 ASCII 英文標準名稱（避免 GitHub Release Asset URL 編碼截斷）與中文名稱
+          Copy-Item -Path $srcExe -Destination "TeamsMeetingRecorder.exe"
+          Copy-Item -Path $srcExe -Destination "release_pkg/Teams會議錄音與轉文字.exe"
+          Copy-Item -Path $srcExe -Destination "release_pkg/TeamsMeetingRecorder.exe"
           if (Test-Path "README.md") {
               Copy-Item -Path "README.md" -Destination "release_pkg/README.md"
           }
@@ -77,13 +79,13 @@ jobs:
               Copy-Item -Path "config.json.example" -Destination "release_pkg/config.json.example"
           }
 
-          # 建立 ZIP 壓縮包
-          $zipName = "Teams會議錄音與轉文字_${tag}_Windows_x64.zip"
+          # 建立 ZIP 壓縮包 (英數檔名確保跨平台與瀏覽器下載相容)
+          $zipName = "TeamsMeetingRecorder_${tag}_Windows_x64.zip"
           Compress-Archive -Path "release_pkg/*" -DestinationPath $zipName -Force
 
           # 計算 SHA256 驗證雜湊碼
-          $hash = Get-FileHash -Path $exePath -Algorithm SHA256
-          "$($hash.Hash)  Teams會議錄音與轉文字.exe" | Out-File -FilePath "Teams會議錄音與轉文字.exe.sha256" -Encoding ascii
+          $hash = Get-FileHash -Path "TeamsMeetingRecorder.exe" -Algorithm SHA256
+          "$($hash.Hash)  TeamsMeetingRecorder.exe" | Out-File -FilePath "TeamsMeetingRecorder.exe.sha256" -Encoding ascii
 
           Write-Host "Packaging completed successfully!"
 
@@ -96,8 +98,8 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            dist/Teams會議錄音與轉文字.exe
-            Teams會議錄音與轉文字_*_Windows_x64.zip
-            Teams會議錄音與轉文字.exe.sha256
+            TeamsMeetingRecorder.exe
+            TeamsMeetingRecorder_*_Windows_x64.zip
+            TeamsMeetingRecorder.exe.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
