@@ -305,8 +305,16 @@ class TeamsRecorderApp:
 
         self.stt_progress_bar = ttk.Progressbar(right_panel, orient="horizontal", mode="determinate")
         self.stt_progress_bar.pack(fill="x", pady=(4, 2))
-        self.stt_status_lbl = ttk.Label(right_panel, text="就緒。選擇音訊檔後點擊開始轉錄。", style="Dim.TLabel")
-        self.stt_status_lbl.pack(anchor="w")
+        self.stt_status_lbl = tk.Label(
+            right_panel,
+            text="💡 就緒。請選擇音訊檔（支援 MP3, WAV, M4A, AAC, FLAC）後點擊開始轉錄。",
+            font=("Segoe UI", 9, "bold"),
+            fg="#1f2328",
+            bg=self.card_bg,
+            anchor="w",
+            justify="left"
+        )
+        self.stt_status_lbl.pack(fill="x", pady=(3, 3))
 
         # 4. 雙分頁展示區 (會議摘要 ＋ 詳細逐字稿)
         self.stt_notebook = ttk.Notebook(right_panel)
@@ -425,6 +433,29 @@ class TeamsRecorderApp:
         if file_selected:
             self.save_path_var.set(file_selected)
 
+    def _get_file_estimate(self, fpath):
+        """根據檔案大小評估雲端轉錄預估所需時間"""
+        if not fpath or not os.path.exists(fpath):
+            return None
+        size_bytes = os.path.getsize(fpath)
+        size_mb = size_bytes / (1024 * 1024)
+        if size_mb < 2:
+            est_time = "約 15 ~ 25 秒"
+            desc = f"{size_mb:.1f} MB (短音訊)"
+        elif size_mb < 8:
+            est_time = "約 25 ~ 45 秒"
+            desc = f"{size_mb:.1f} MB"
+        elif size_mb < 20:
+            est_time = "約 45 ~ 75 秒"
+            desc = f"{size_mb:.1f} MB"
+        elif size_mb < 50:
+            est_time = "約 1 ~ 2 分鐘"
+            desc = f"{size_mb:.1f} MB"
+        else:
+            est_time = "約 2 ~ 4 分鐘"
+            desc = f"{size_mb:.1f} MB (大檔案)"
+        return size_mb, desc, est_time
+
     def _browse_stt_file(self):
         f = filedialog.askopenfilename(
             title="選擇要轉錄的音訊檔案",
@@ -435,6 +466,13 @@ class TeamsRecorderApp:
         )
         if f:
             self.stt_file_var.set(f)
+            est = self._get_file_estimate(f)
+            if est:
+                _, desc, est_time = est
+                self.stt_status_lbl.configure(
+                    text=f"📁 已選取：{os.path.basename(f)}（大小約 {desc}，預估轉錄需 {est_time}），請點擊下方開始轉錄。",
+                    fg="#0969da"
+                )
 
     def _refresh_device_list(self):
         self.spk_devices, self.mic_devices = self.engine.get_devices()
@@ -557,6 +595,13 @@ class TeamsRecorderApp:
 
                 # 【貼心功能】自動填入右側語音轉文字檔案路徑！
                 self.stt_file_var.set(final_file)
+                est = self._get_file_estimate(final_file)
+                if est:
+                    _, desc, est_time = est
+                    self.stt_status_lbl.configure(
+                        text=f"📁 錄音已就緒：{os.path.basename(final_file)}（大小約 {desc}，預估轉錄需 {est_time}），點擊下方按鈕開始轉錄。",
+                        fg="#0969da"
+                    )
 
                 # 生成下一次預設檔名
                 default_dir = os.path.dirname(final_file)
@@ -617,11 +662,52 @@ class TeamsRecorderApp:
         transcriber.save_config(self.cfg)
 
         self.is_transcribing = True
-        self.transcribe_btn.configure(text="⏳ 雲端 AI 轉錄進行中...", state="disabled", bg="#6a737d")
+
+        # 估算檔案大小與轉錄時間
+        est = self._get_file_estimate(audio_file)
+        if est:
+            _, self.transcribe_size_desc, self.transcribe_est_time = est
+        else:
+            self.transcribe_size_desc, self.transcribe_est_time = "未知大小", "約 45 秒"
+
+        self.transcribe_start_time = time.time()
+        self.current_stt_step = "準備上傳音訊至雲端..."
+        self.current_stt_pct = 5
+
+        # 醒目按鈕樣式：鮮明藍底白字，不使用 disabled 避免系統強制反灰變看不清
+        self.transcribe_btn.configure(
+            text="⏳ 雲端 AI 轉錄分析中，請耐心等候...",
+            bg="#0969da",
+            fg="#ffffff",
+            cursor="watch"
+        )
         self.stt_progress_bar["value"] = 5
-        self.stt_status_lbl.configure(text="正在啟動轉錄作業...", foreground="#0366d6")
+        self.stt_status_lbl.configure(
+            text=f"⏳ [5%] 正在啟動...（檔案約 {self.transcribe_size_desc}，預估需 {self.transcribe_est_time}，請耐心等候）",
+            fg="#0969da"
+        )
+
+        # 啟動每秒跳動的已耗時計時器
+        self._schedule_transcribe_ticker()
 
         threading.Thread(target=self._run_transcription_worker, daemon=True).start()
+
+    def _schedule_transcribe_ticker(self):
+        """背景轉錄時的即時耗時計時器，每秒更新讓使用者安心知道持續運行中"""
+        if not self.is_transcribing:
+            return
+        elapsed = int(time.time() - getattr(self, "transcribe_start_time", time.time()))
+        step = getattr(self, "current_stt_step", "雲端 AI 分析中...")
+        pct = getattr(self, "current_stt_pct", 5)
+        est = getattr(self, "transcribe_est_time", "約 45 秒")
+        size_desc = getattr(self, "transcribe_size_desc", "")
+        size_info = f"檔案約 {size_desc}，" if size_desc else ""
+
+        self.stt_status_lbl.configure(
+            text=f"⏳ [{pct}%] {step}（{size_info}預估需 {est}，請耐心等候... 已進行 {elapsed} 秒）",
+            fg="#0969da"
+        )
+        self.root.after(1000, self._schedule_transcribe_ticker)
 
     def _run_transcription_worker(self):
         audio_file = self.stt_file_var.get().strip()
@@ -630,8 +716,17 @@ class TeamsRecorderApp:
 
         def progress_cb(pct, text):
             def update():
-                self.stt_progress_bar["value"] = int(pct * 100)
-                self.stt_status_lbl.configure(text=f"[{int(pct * 100)}%] {text}", foreground="#0366d6")
+                self.current_stt_pct = int(pct * 100)
+                self.current_stt_step = text
+                self.stt_progress_bar["value"] = self.current_stt_pct
+                elapsed = int(time.time() - getattr(self, "transcribe_start_time", time.time()))
+                est = getattr(self, "transcribe_est_time", "約 45 秒")
+                size_desc = getattr(self, "transcribe_size_desc", "")
+                size_info = f"檔案約 {size_desc}，" if size_desc else ""
+                self.stt_status_lbl.configure(
+                    text=f"⏳ [{self.current_stt_pct}%] {text}（{size_info}預估需 {est}，請耐心等候... 已進行 {elapsed} 秒）",
+                    fg="#0969da"
+                )
             self.root.after(0, update)
 
         try:
@@ -643,9 +738,19 @@ class TeamsRecorderApp:
             )
 
             def on_success(res_dict=result):
+                self.is_transcribing = False
+                elapsed = int(time.time() - getattr(self, "transcribe_start_time", time.time()))
                 self.stt_progress_bar["value"] = 100
-                self.stt_status_lbl.configure(text="✅ 轉錄完成！已自動產出摘要與逐字稿二個檔案。", foreground="#28a745")
-                self.transcribe_btn.configure(text="🚀 開始轉錄語音為文字 (自動產生摘要＋逐字稿)", state="normal", bg="#2da44e")
+                self.stt_status_lbl.configure(
+                    text=f"✅ 轉錄完成！已自動產出摘要與逐字稿二個檔案。（共耗時 {elapsed} 秒）",
+                    fg="#1a7f37"
+                )
+                self.transcribe_btn.configure(
+                    text="🚀 開始轉錄語音為文字 (自動產生摘要＋逐字稿)",
+                    bg="#2da44e",
+                    fg="#ffffff",
+                    cursor="hand2"
+                )
                 self.last_stt_result = res_dict
 
                 # 填入文字框
@@ -674,8 +779,14 @@ class TeamsRecorderApp:
 
         except Exception as e:
             def on_error(err=str(e)):
-                self.stt_status_lbl.configure(text=f"❌ 轉錄失敗：{err}", foreground="#cb2431")
-                self.transcribe_btn.configure(text="🚀 開始轉錄語音為文字 (自動產生摘要＋逐字稿)", state="normal", bg="#2da44e")
+                self.is_transcribing = False
+                self.stt_status_lbl.configure(text=f"❌ 轉錄失敗：{err}", fg="#cf222e")
+                self.transcribe_btn.configure(
+                    text="🚀 開始轉錄語音為文字 (自動產生摘要＋逐字稿)",
+                    bg="#2da44e",
+                    fg="#ffffff",
+                    cursor="hand2"
+                )
                 messagebox.showerror("轉錄失敗", f"執行語音轉文字時發生錯誤：\n\n{err}")
             self.root.after(0, on_error)
         finally:

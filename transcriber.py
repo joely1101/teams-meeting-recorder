@@ -8,6 +8,7 @@
 
 import os
 import sys
+import time
 import json
 import base64
 import requests
@@ -79,9 +80,9 @@ def transcribe_cloud_gemini(audio_path, api_key, summarize=True, progress_cb=Non
             }
         }
     else:
-        # 使用 Google File API (Resumable Upload)
+        # 使用 Google File API (Resumable Upload) 支援大檔案
         log(0.20, f"音訊檔案較大 ({file_size // (1024*1024)} MB)，正在上傳至 Google 檔案伺服器...")
-        upload_init_url = f"https://generativelanguage.googleapis.com/v1beta/files?key={api_key}"
+        upload_init_url = f"https://generativelanguage.googleapis.com/upload/v1beta/files?key={api_key}"
         headers = {
             "X-Goog-Upload-Protocol": "resumable",
             "X-Goog-Upload-Command": "start",
@@ -95,6 +96,9 @@ def transcribe_cloud_gemini(audio_path, api_key, summarize=True, progress_cb=Non
             raise RuntimeError(f"初始化檔案上傳失敗 ({res_init.status_code}): {res_init.text}")
 
         upload_url = res_init.headers.get("X-Goog-Upload-URL")
+        if not upload_url:
+            raise RuntimeError(f"無法取得 Google 上傳網址，請確認網路連線與 API Key。")
+
         with open(audio_path, "rb") as f:
             upload_headers = {
                 "Content-Length": str(file_size),
@@ -107,6 +111,24 @@ def transcribe_cloud_gemini(audio_path, api_key, summarize=True, progress_cb=Non
 
         file_info = res_upload.json().get("file", {})
         file_uri = file_info.get("uri")
+        file_name = file_info.get("name")
+        file_state = file_info.get("state")
+
+        # 若檔案仍在 PROCESSING，稍作等待至 ACTIVE
+        if file_state == "PROCESSING" and file_name:
+            log(0.35, "雲端伺服器正在準備音訊檔案...")
+            for _ in range(30):
+                time.sleep(2)
+                check_url = f"https://generativelanguage.googleapis.com/v1beta/{file_name}?key={api_key}"
+                check_res = requests.get(check_url)
+                if check_res.status_code == 200:
+                    info = check_res.json()
+                    if info.get("state") == "ACTIVE":
+                        file_uri = info.get("uri", file_uri)
+                        break
+                    elif info.get("state") == "FAILED":
+                        raise RuntimeError("Google 檔案處理失敗")
+
         audio_part = {
             "fileData": {
                 "mimeType": mime_type,
@@ -119,28 +141,32 @@ def transcribe_cloud_gemini(audio_path, api_key, summarize=True, progress_cb=Non
     summary_instruction = ""
     if summarize:
         summary_instruction = """
-請務必使用以下特定標籤分別包裹【會議摘要】與【逐字稿】：
+請務必使用以下特定標籤包裹【會議摘要】：
 ===SUMMARY_START===
-### 📊 會議摘要
-- 📌 核心重點與討論主題 (條列式)
+### 📊 會議摘要 (繁體中文)
+- 📌 核心重點與討論主題 (條列式整理)
 - ✅ 待辦事項與決策指派 (Action Items)
 ===SUMMARY_END===
+**重要：無論會議是英文、中文或中英雙語，【會議摘要】請一律使用清晰的「繁體中文」進行結構化總結。**
 """
     else:
         summary_instruction = "不需提供會議摘要。"
 
-    prompt = f"""這是一段 Teams 繁體中文會議錄音。
-請將這段音訊轉錄為精確的繁體中文逐字稿，要求如下：
+    prompt = f"""這是一段 Teams 會議錄音（語言可能是英文、繁體中文或中英混雜）。
+請將這段音訊轉錄為精確的逐字稿，要求如下：
 1. 請嚴格使用以下標籤包裹逐字稿內容：
 ===TRANSCRIPT_START===
 逐字稿內容
 ===TRANSCRIPT_END===
-2. 逐字稿必須標註時間軸 [MM:SS] 或 [HH:MM:SS]。
-3. 必須進行人物聲音識別 (Speaker Diarization)，明確區分不同的說話者（例如：「說話者 A」、「說話者 B」或根據語境角色標註）。
-4. 逐字稿格式範例：
-   [00:01:15] 說話者 A：大家早安，我們今天開始討論錄音專案進度...
-   [00:01:23] 說話者 B：好的，目前系統架構已經完成...
-5. 保持語句通順，自動校正語音辨識的同音錯字與常見 IT/商業術語。
+2. 語言處理原則：
+   - 【逐字稿】：必須忠實保留說話者的「原文」（英文發言就記錄英文原文，中文發言就記錄繁體中文，中英夾雜則維持原樣，切勿將逐字稿翻譯）。
+   - 【會議摘要】：無論錄音使用何種語言，一律使用「繁體中文」進行重點總結。
+3. 逐字稿必須標註時間軸 [MM:SS] 或 [HH:MM:SS]。
+4. 必須進行人物聲音識別 (Speaker Diarization)，明確區分不同的說話者（例如：「說話者 A」、「說話者 B」，或若對話中有提及姓名可直接標註例如「[Shelly]」、「[Joel]」）。
+5. 逐字稿格式範例：
+   [00:01:15] 說話者 A：Good morning everyone, let's start today's discussion...
+   [00:01:23] 說話者 B：好的，我們今天主要針對規格與交付時程進行確認...
+6. 保持語句通順，自動校正語音辨識的同音錯字與常見 IT/商業術語。
 {summary_instruction}
 """
 
