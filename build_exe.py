@@ -5,18 +5,23 @@ import datetime
 import shutil
 
 def build():
-    # 取得當前時間戳記，格式：YYYY/MM/DD-HH:MM
-    build_time = datetime.datetime.now().strftime("%Y/%m/%d-%H:%M")
+    # 支援透過環境變數指定 Release Tag (例如 v1.0)
+    tag = os.environ.get("RELEASE_TAG")
+    if tag:
+        build_time = f"{tag} ({datetime.datetime.now().strftime('%Y/%m/%d')})"
+    else:
+        build_time = datetime.datetime.now().strftime("%Y/%m/%d-%H:%M")
+
     print(f"==================================================")
     print(f"開始編譯 Teams 會議錄音與轉文字 EXE")
-    print(f"版本時間戳記: {build_time}")
+    print(f"版本標記: {build_time}")
     print(f"==================================================")
 
     # 1. 自動寫入 version.py
     base_dir = os.path.dirname(os.path.abspath(__file__))
     version_file = os.path.join(base_dir, "version.py")
     with open(version_file, "w", encoding="utf-8") as f:
-        f.write(f'# 此檔案記錄軟體版本資訊（以 EXE 打包時間為準）\n')
+        f.write(f'# 此檔案記錄軟體版本資訊（以 EXE 打包時間或 Release 標籤為準）\n')
         f.write(f'BUILD_VERSION = "{build_time}"\n')
     print(f"[1/3] 已更新 version.py: BUILD_VERSION = '{build_time}'")
 
@@ -25,7 +30,6 @@ def build():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
-        "--onedir",
         "--windowed",
         "--name", "Teams會議錄音與轉文字",
         "--onefile",
